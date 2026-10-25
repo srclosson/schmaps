@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -34,7 +35,7 @@ android {
                 // Decode the CI-provided keystore into the build dir.
                 val ksFile = layout.buildDirectory.file("ci-keystore.jks").get().asFile
                 ksFile.parentFile.mkdirs()
-                ksFile.writeBytes(java.util.Base64.getDecoder().decode(ksB64))
+                ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
                 storeFile = ksFile
             } else if (ksPath != null) {
                 storeFile = rootProject.file(ksPath)
