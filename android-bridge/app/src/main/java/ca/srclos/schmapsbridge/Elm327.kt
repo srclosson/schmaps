@@ -26,7 +26,7 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
         send("ATZ")
         Thread.sleep(500) // clones need a beat after reset
         val ident = send("ATI") ?: return false
-        if (!ident.contains("ELM", ignoreCase = true)) return false
+        if (ident.none { it.contains("ELM", ignoreCase = true) }) return false
         send("ATE0")
         send("ATL0")
         send("ATS0")

@@ -46,7 +46,7 @@ class BridgeService : Service() {
         if (running.getAndSet(true)) return START_STICKY
 
         startInForeground("Connecting…")
-        BridgeState.set(BridgeState.Connecting)
+        BridgeState.set(BridgeState.State.Connecting)
 
         http = BridgeHttpServer().also { it.start() }
 
@@ -67,7 +67,7 @@ class BridgeService : Service() {
         } catch (_: Exception) {
         }
         http = null
-        BridgeState.set(BridgeState.Stopped)
+        BridgeState.set(BridgeState.State.Stopped)
         super.onDestroy()
     }
 
@@ -120,7 +120,7 @@ class BridgeService : Service() {
                 return
             }
             val name = device.name ?: device.address
-            BridgeState.set(BridgeState.Connected(name))
+            BridgeState.set(BridgeState.State.Connected(name))
             updateNotification("Connected to $name — feeding schmaps")
 
             val poller = Poller(elm)
@@ -140,7 +140,7 @@ class BridgeService : Service() {
 
     private fun fail(message: String) {
         running.set(false)
-        BridgeState.set(BridgeState.Error(message))
+        BridgeState.set(BridgeState.State.Error(message))
         updateNotification(message)
         stopSelf()
     }
