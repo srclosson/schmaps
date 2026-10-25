@@ -240,10 +240,10 @@ per leg and the pills only mark the leg you're driving.
 ### Saved places & tags — “go to Grandma’s House”
 
 Any destination can be named. Route somewhere, and the route card
-offers a 🏷️ **name + tags** form: save “12 REDACTED Court, Kanata,
-Ontario” as *Grandma’s House*, tag it *family*, and from then on
-*“go to Grandma’s House”* — typed or spoken — routes straight there, no
-geocoder involved. Names match fuzzily, so voice input survives a
+offers a 🏷️ **name + tags** form: save any address as *Grandma’s
+House*, tag it *family*, and from then on *“go to Grandma’s House”* —
+typed or spoken — routes straight there, no geocoder involved. Names
+match fuzzily, so voice input survives a
 mis-heard syllable or two. A tag on its own filters your places:
 *“go to family”* lists every place tagged family. Saved places work in
 errands too — *“errands: Grandma’s House, buy gas”* — and every routed
