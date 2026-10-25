@@ -33,10 +33,27 @@ android {
             val ksPath = props.getProperty("keystore.path")
             if (ksB64 != null) {
                 // Decode the CI-provided keystore into the build dir.
+                // A secret that doesn't decode to a REAL keystore (wrong
+                // base64, a text file pasted in, a truncated upload) is
+                // treated as absent — the debug-key fallback below still
+                // ships an installable APK instead of failing the build.
                 val ksFile = layout.buildDirectory.file("ci-keystore.jks").get().asFile
                 ksFile.parentFile.mkdirs()
-                ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
-                storeFile = ksFile
+                val ksPass = System.getenv("KEYSTORE_PASSWORD") ?: props.getProperty("keystore.password") ?: ""
+                val ksAlias = System.getenv("KEY_ALIAS") ?: props.getProperty("keystore.alias") ?: ""
+                try {
+                    ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
+                    // Validate: a keystore that can't be loaded (or has
+                    // no such alias) would only fail later, at packaging.
+                    java.security.KeyStore.getInstance("JKS").run {
+                        load(ksFile.inputStream(), ksPass.toCharArray())
+                        require(ksAlias.isEmpty() || containsAlias(ksAlias))
+                    }
+                    storeFile = ksFile
+                } catch (_: Exception) {
+                    logger.warn("ci-keystore invalid — falling back to debug signing")
+                    ksFile.delete()
+                }
             } else if (ksPath != null) {
                 storeFile = rootProject.file(ksPath)
             }
