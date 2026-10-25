@@ -385,25 +385,30 @@ alternative just promotes that route — zero API calls.) A slow
 same line. Errands stops you reach are checked off (✓) and the
 remaining stops re-time from where you are, in the planned order.
 
-**Driver learning.** How you actually drive is measured per speed class
-and kept **on the device** — localStorage, never a cookie (the server
-never needs it, and your driving style stays yours). For each limit
-class, rounded to the nearest 10 km/h, the app keeps a running average
-of your actual speed and the sample count behind it, so trips merge
-losslessly: an average of 110 km/h in 100-zones over 1000 samples, plus
-today's ten more, updates the average exactly. Future kilometres are
-re-timed at your learned pace per limit — so the next trip you ask for
-starts with a better prediction, and classes you haven't driven enough
-yet simply fall back to the router's own assumption. Learning is
-**two-tier**: the roads you drive every week learn their own baselines
-keyed by OSM segment IDs (OSRM's node annotation — identity from the
-router's snapped geometry, immune to GPS drift), while the limit-class
-tier generalizes to roads you've never driven. And the model is
-**anomaly-protected**: stretches flagged with a live 511 incident are
-never learned from, samples below 45% of the limit (gridlock, a
-red-light crawl) or above 150% (GPS noise) are discarded — traffic is a
-transient event, not a structural change to how a road moves. The model
-lives in [`public/js/driver-profile.js`](public/js/driver-profile.js).
+**Driver learning.** How you actually drive is measured per **posted
+speed-limit bucket** (50, 80, 100, 110 — rounded to the nearest
+10 km/h) and kept **on the device** — localStorage, never a cookie (the
+server never needs it, and your driving style stays yours). Each bucket
+carries a global **driver scalar** (multiplier) and a sample count, so
+trips merge losslessly: a scalar of 1.04 on the 100 km/h bucket over
+1000 samples, plus today's ten more, updates it exactly. The predicted
+speed on any road is `posted limit × bucket scalar` — a driver who does
+104 in 100-zones does it on *any* 100-zone, which is what makes the model
+portable across regions (Ontario vs. Alberta) where road
+classifications differ but behaviour relative to the limit doesn't.
+Future kilometres are re-timed down a **fallback hierarchy**: a
+segment-specific override first (only for heavily-traveled roads that
+persistently deviate from their bucket — more than 3 samples and off
+the bucket scalar by over 10%), then the bucket scalar × posted limit,
+then the raw posted limit itself. Learning is **lean**: the store is a
+tiny lookup map of buckets plus a handful of deviant segments, well
+under the 5 MB localStorage cap — converged segments are pruned, not
+hoarded. And the model is **anomaly-protected**: stretches flagged with
+a live 511 incident are never learned from, samples below 45% of the
+limit (gridlock, a red-light crawl) or above 150% (GPS noise) are
+discarded — traffic is a transient event, not a structural change to
+how a road moves. The model lives in
+[`public/js/driver-profile.js`](public/js/driver-profile.js).
 
 ### Turn-by-turn guidance — next turn, distance, and lanes
 
