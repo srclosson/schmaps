@@ -3,7 +3,7 @@
  * Map tiles, geocoding, routing and traffic always go to the network.
  */
 
-const VERSION = 'schmaps-v81';
+const VERSION = 'schmaps-v82';
 const APP_SHELL = [
   './',
   'index.html',

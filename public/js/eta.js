@@ -204,8 +204,9 @@ export function updateSpeedRatio(ratio, { speedKmh, refKmh } = {}) {
 /**
  * Remaining seconds from `progressM`: live GPS speed on the current
  * partial km, incident delay added raw, and for future kms the learned
- * per-class speed when `predict` supplies one (see js/driver-profile.js)
- * — else the session's personal ratio applied to the router's own time.
+ * speed-limit-bucket scalar (posted limit × multiplier) when `predict`
+ * supplies one (see js/driver-profile.js) — else the session's personal
+ * ratio applied to the router's own time.
  * Returns 0 when the position is at (or past) the end.
  *
  * @param {object} profile from buildKmProfile

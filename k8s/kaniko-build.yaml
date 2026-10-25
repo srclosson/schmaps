@@ -55,7 +55,7 @@ spec:
             - --context=/workspace
             - --dockerfile=/workspace/Dockerfile
             - --destination=harbor.srclos.zone/library/schmaps:latest
-            - --destination=harbor.srclos.zone/library/schmaps:v0.2.80
+            - --destination=harbor.srclos.zone/library/schmaps:v0.2.81
             - --cache=false
             - --verbosity=info
           volumeMounts:

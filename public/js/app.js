@@ -45,9 +45,10 @@ import {
   saveObdSettings,
 } from './obd.js';
 
-// Driver behaviour model — learned speeds per limit class, persisted in
-// localStorage across trips (see js/driver-profile.js). Feeds the
-// per-km ETA's future-bucket timing; flushed on pagehide so learned
+// Driver behaviour model — a global driver scalar (multiplier) per
+// speed-limit bucket, persisted in localStorage across trips (see
+// js/driver-profile.js). Feeds the per-km ETA's future-bucket timing;
+// flushed on pagehide so learned
 // samples survive a closed tab.
 const driverProfile = createDriverProfile();
 window.addEventListener('pagehide', () => driverProfile.flush());
@@ -2663,7 +2664,9 @@ function tickNavigationEta() {
   // never on a stretch flagged with a live incident: traffic is an
   // event, not a habit. (The 45%-of-limit congestion guard and the
   // 150% GPS-glitch guard live inside the profile.) Two tiers: the
-  // road segment's own baseline (OSM node pair) and the limit class.
+  // speed-limit bucket scalar (posted limit × multiplier) and, only
+  // for persistently deviant heavily-traveled roads, a segment
+  // override (OSM node pair).
   const incidentFlag = (bucket?.incidentS ?? 0) > 0;
   if (
     refKmh !== null &&
