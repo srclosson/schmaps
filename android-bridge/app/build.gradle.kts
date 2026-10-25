@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.util.Base64
+import java.security.KeyStore
 
 plugins {
     id("com.android.application")
@@ -45,7 +46,7 @@ android {
                     ksFile.writeBytes(Base64.getDecoder().decode(ksB64))
                     // Validate: a keystore that can't be loaded (or has
                     // no such alias) would only fail later, at packaging.
-                    java.security.KeyStore.getInstance("JKS").run {
+                    KeyStore.getInstance("JKS").apply {
                         load(ksFile.inputStream(), ksPass.toCharArray())
                         require(ksAlias.isEmpty() || containsAlias(ksAlias))
                     }
