@@ -47,7 +47,17 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // Signed with the release key when CI provides the keystore
+            // (repo secrets); otherwise falls back to the DEBUG key so
+            // the APK is still built, installable and downloadable on
+            // every push — signing setup becomes an upgrade, not a
+            // prerequisite. (Re-signing with the release key later
+            // requires an uninstall, but a missing artifact is worse.)
+            signingConfig = if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = false
         }
     }
