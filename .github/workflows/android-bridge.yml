@@ -1,8 +1,8 @@
 name: android-bridge APK
 
-# Builds the signed Schmaps OBD bridge APK on every push that touches
-# the android-bridge/ directory, plus manual runs. The APK lands in the
-# run's Artifacts — download it, sideload it, done.
+# Builds the signed Schmaps OBD bridge APK on EVERY push to the repo
+# (any code change), plus manual runs. The APK lands in the run's
+# Artifacts — download it, sideload it, done.
 #
 # One-time keystore bootstrap (no local Java needed — the runner has it):
 #   1. Run this workflow once with the "Generate keystore" input enabled.
@@ -17,9 +17,6 @@ name: android-bridge APK
 
 on:
   push:
-    paths:
-      - "android-bridge/**"
-      - ".github/workflows/android-bridge.yml"
   workflow_dispatch:
     inputs:
       generate_keystore:

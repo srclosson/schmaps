@@ -3,7 +3,7 @@
  * Map tiles, geocoding, routing and traffic always go to the network.
  */
 
-const VERSION = 'schmaps-v82';
+const VERSION = 'schmaps-v84';
 const APP_SHELL = [
   './',
   'index.html',
@@ -20,6 +20,7 @@ const APP_SHELL = [
   'js/categories.js',
   'js/hours.js',
   'js/driver-profile.js',
+  'js/activity.js',
   'js/places.js',
   'js/places-store.js',
   'js/poi.js',

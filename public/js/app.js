@@ -21,6 +21,7 @@ import {
   RATIO_SAMPLE_MIN_KMH,
 } from './eta.js';
 import { createDriverProfile } from './driver-profile.js';
+import { createActivityClassifier, ACTIVITY } from './activity.js';
 import { isErrandsQuery, parseErrands, refreshErrands, runErrands } from './errands.js';
 import { isVoiceSupported, listenOnce, speak, isMuted, setMuted } from './voice.js';
 import { suggestPlaces, normalizeName, loadPlaces } from './places.js';
@@ -52,6 +53,54 @@ import {
 // samples survive a closed tab.
 const driverProfile = createDriverProfile();
 window.addEventListener('pagehide', () => driverProfile.flush());
+
+// Zero-config activity classifier — walking / running / cycling /
+// driving, detected from signals the app already receives: OBD bridge
+// liveness (in a car, full stop) and the GPS speed+jerk signature
+// (see js/activity.js). No mode picker, no settings, no extra
+// permissions. It re-points ROUTER.profile for routing and supplies
+// per-mode ETA reference speeds; driver-profile learning only fires
+// while driving.
+const activity = createActivityClassifier();
+/**
+ * Explicit travel-mode verbs — "walk to X", "bike to the grocery
+ * store", "fastest route to X". The verb wins over the activity
+ * classifier (you said it, you meant it) and is stripped so the
+ * destination still geocodes / matches saved places / categories.
+ * "Fastest route" reads as driving — that's the speed framing.
+ */
+const MODE_VERBS = [
+  { re: /\b(?:walk|walk(?:ing)?|on\s+foot|jog|jogging|run|running|hike|hiking)\b\s*(?:to|over\s+to|to\s+the)?\s*/i,
+    profile: 'foot', activity: ACTIVITY.WALKING },
+  { re: /\b(?:bike|biking|cycle|cycling|ride|riding)\b\s*(?:to|over\s+to|to\s+the)?\s*/i,
+    profile: 'bike', activity: ACTIVITY.CYCLING },
+  { re: /\b(?:fastest\s+(?:route|way)|drive|driving)\b\s*(?:to|over\s+to|to\s+the)?\s*/i,
+    profile: 'driving', activity: ACTIVITY.DRIVING },
+];
+
+/**
+ * Parse a travel-mode verb off the front of a query.
+ * @returns {{profile: string, activity: string, rest: string}|null}
+ */
+function parseTravelMode(query) {
+  for (const v of MODE_VERBS) {
+    const m = v.re.exec(query);
+    if (m) {
+      return { profile: v.profile, activity: v.activity, rest: query.slice(m[0].length).trim() };
+    }
+  }
+  return null;
+}
+
+/** The OSRM profile to route with — an explicit mode verb beats the
+ *  activity classifier, which beats the config default. */
+const routingProfile = () => state.modeOverride ?? activity.osrmProfile() ?? ROUTER.profile;
+/** Re-point ROUTER.profile ahead of each route computation — the
+ *  errands planner and the route proxy build their OSRM URLs from it
+ *  at call time, so this single assignment retargets routing. */
+const syncRoutingProfile = () => {
+  ROUTER.profile = routingProfile();
+};
 
 /* ---------------- DOM ---------------- */
 
@@ -146,6 +195,7 @@ const state = {
   poiSearch: null, // active browse { cat, origin, radiusM } — powers "Search this area"
   alternatives: [], // other routes from the last compute — chips + gray lines
   routePreference: null, // the user's chip choice — survives reroutes
+  modeOverride: null, // explicit travel-mode verb ("walk/bike/fastest route to X") — beats the classifier
   choiceMarkers: [], // on-map badges (selected / fastest / fastest / eco / USA / Canada-via) — one per route
   badgeMarkers: [], // "+min" slowdown pills on the coloured line
   usaWarned: false, // one voice warning per route about USA crossings
@@ -296,6 +346,12 @@ function startStandbyWatch() {
       const { latitude: lat, longitude: lon, heading, speed } = pos.coords;
       state.lastFix = { lat, lon, at: pos.timestamp };
       state.gpsLocked = true;
+      // Feed the activity classifier on every fix — it needs no
+      // permission and no UI, just the speed stream.
+      activity.observe(
+        Number.isFinite(speed) ? speed * 3.6 : null,
+        pos.timestamp
+      );
       updateLocationCursor({ lat, lon, heading, speedMps: speed });
       updateSpeedHud(speed);
       if (!state.centeredOnFirstFix) {
@@ -434,6 +490,9 @@ function renderObdGauges(gauges) {
 
 async function obdTick() {
   const feed = await obd.transport.poll();
+  // The bridge feed is the activity classifier's killer signal: a
+  // live ELM327 means a car, full stop.
+  activity.setObdLive(!!feed);
   if (feed) {
     obd.everSeen = true;
     // The car reports no odometer PID — advance ours from the speed
@@ -602,6 +661,7 @@ async function routeToDestination(dest) {
   state.destination = dest;
   showStatus(`Found ${dest.label}. Computing route…`, { sticky: true });
 
+  syncRoutingProfile(); // walk/bike/drive per the activity classifier
   const route = await computeRoute(state.origin, dest);
   state.route = route;
   state.alternatives = route.alternatives ?? [];
@@ -666,11 +726,23 @@ function showSuggestions(query, candidates, { title, spoken } = {}) {
   speak(spoken ?? `I couldn't find ${query}. Did you mean ${candidates[0].name}?`);
 }
 
-async function handleDestinationQuery(query) {
-  if (!query || !query.trim()) return;
+async function handleDestinationQuery(rawQuery) {
+  if (!rawQuery || !rawQuery.trim()) return;
   hideSuggestions();
   hideAutocomplete();
   clearPoiMarkers();
+
+  // Explicit travel-mode verb — "walk to X", "bike to the grocery
+  // store", "fastest route to X". The verb pins the activity (beats
+  // the classifier AND the OBD bridge) and is stripped so the
+  // destination still geocodes / matches saved places / categories.
+  // No verb → the pin clears and the classifier's mode stands.
+  const mode = parseTravelMode(rawQuery);
+  state.modeOverride = mode?.profile ?? null;
+  if (mode) activity.pin(mode.activity);
+  else activity.clearPin();
+  const query = mode?.rest || rawQuery;
+  if (!query.trim()) return;
 
   // A tag on its own filters saved places — "go to family" lists
   // every place tagged family.
@@ -1296,6 +1368,7 @@ async function handleErrandsQuery(query) {
 
   try {
     showStatus(`Planning ${fragments.length} stop${fragments.length === 1 ? '' : 's'}…`, { sticky: true });
+    syncRoutingProfile(); // walk/bike/drive per the activity classifier
     const result = await runErrands(state.origin, fragments, {
       onProgress: (frag, i, total) =>
         showStatus(`Finding “${frag}”… (${i + 1}/${total})`, { sticky: true }),
@@ -2394,6 +2467,10 @@ function startNavigating() {
         // we've reached the next errands stop.
         state.lastFix = { lat, lon, at: pos.timestamp };
         state.gpsLocked = true;
+        activity.observe(
+          Number.isFinite(speed) ? speed * 3.6 : null,
+          pos.timestamp
+        );
         updateLocationCursor({ lat, lon, heading, speedMps: speed });
         updateSpeedHud(speed);
         checkStopProximity();
@@ -2545,6 +2622,7 @@ async function refreshActiveRoute({ reason = null } = {}) {
         stopRouteRefresh();
         return;
       }
+      syncRoutingProfile(); // walk/bike/drive per the activity classifier
       const fresh = await refreshErrands(origin, remaining);
       let i = 0;
       for (const stop of state.errands.stops) {
@@ -2574,6 +2652,7 @@ async function refreshActiveRoute({ reason = null } = {}) {
       updateErrandsDisplay();
       maybeSpeakEtaShift(fresh.eta);
     } else if (state.route && state.destination) {
+      syncRoutingProfile(); // walk/bike/drive per the activity classifier
       const fresh = await computeRoute(origin, state.destination);
       // Honour the user's chip choice — if they picked the Canadian
       // route (or any other), keep them on it across refreshes.
@@ -2658,17 +2737,24 @@ function tickNavigationEta() {
 
   const speedKmh = state.currentSpeedKmh;
   const { index: bucketIdx, bucket } = bucketAt(profile, state.lastProgressM);
-  const refKmh = bucket?.limitKmh ?? bucket?.impliedKmh ?? null;
+  // Reference speed for the ratio: the posted limit when known, the
+  // router's implied speed otherwise — and off-car (foot/bike routes
+  // carry no posted limits), the classifier's per-mode reference so
+  // the personal ratio still calibrates against something sane.
+  const refKmh =
+    bucket?.limitKmh ?? bucket?.impliedKmh ?? activity.referenceKmh() ?? null;
   state.speedRatio = updateSpeedRatio(state.speedRatio, { speedKmh, refKmh });
-  // Learn into the persistent profile — real driving speeds only, and
-  // never on a stretch flagged with a live incident: traffic is an
-  // event, not a habit. (The 45%-of-limit congestion guard and the
-  // 150% GPS-glitch guard live inside the profile.) Two tiers: the
-  // speed-limit bucket scalar (posted limit × multiplier) and, only
-  // for persistently deviant heavily-traveled roads, a segment
-  // override (OSM node pair).
+  // Learn into the persistent profile — real DRIVING speeds only
+  // (never walking, running or cycling: those aren't speed-limit
+  // habits), and never on a stretch flagged with a live incident:
+  // traffic is an event, not a habit. (The 45%-of-limit congestion
+  // guard and the 150% GPS-glitch guard live inside the profile.)
+  // Two tiers: the speed-limit bucket scalar (posted limit ×
+  // multiplier) and, only for persistently deviant heavily-traveled
+  // roads, a segment override (OSM node pair).
   const incidentFlag = (bucket?.incidentS ?? 0) > 0;
   if (
+    activity.getActivity() === ACTIVITY.DRIVING &&
     refKmh !== null &&
     Number.isFinite(speedKmh) &&
     speedKmh >= RATIO_SAMPLE_MIN_KMH &&
