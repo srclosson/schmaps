@@ -35,7 +35,9 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
+      # (No android-actions/setup-android needed: ubuntu-latest
+      #  runners ship the Android SDK preinstalled — and that action
+      #  has been failing upstream.)
 
       # The Gradle wrapper jar isn't committed (no local Java to
       # generate it) — install Gradle on the runner instead.
