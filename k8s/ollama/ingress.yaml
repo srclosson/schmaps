@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ollama
+  namespace: ollama
+  labels:
+    app.kubernetes.io/name: ollama
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    external-dns.alpha.kubernetes.io/hostname: ollama-civo.stackgen.run
+    external-dns.alpha.kubernetes.io/target: 212.2.243.121
+    # LLM generation can stream for a long time; keep the connection open.
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: ollama-civo.stackgen.run
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ollama
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - ollama-civo.stackgen.run
+      secretName: ollama-tls

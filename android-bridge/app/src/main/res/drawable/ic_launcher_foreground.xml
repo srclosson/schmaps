@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A stylized engine gauge — needle at 2 o'clock. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dial face -->
+    <path
+        android:fillColor="#ffffff"
+        android:pathData="M54,54 m-26,0 a26,26 0 1,1 52,0 a26,26 0 1,1 -52,0" />
+    <!-- Tick marks around the dial -->
+    <path
+        android:strokeColor="#d52b1e"
+        android:strokeWidth="3"
+        android:pathData="M54,32 L54,38 M74,54 L68,54 M54,76 L54,70 M34,54 L40,54" />
+    <!-- Needle -->
+    <path
+        android:strokeColor="#1c1c1e"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M54,54 L68,40" />
+    <!-- Center hub -->
+    <path
+        android:fillColor="#d52b1e"
+        android:pathData="M54,54 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+</vector>

@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: schmaps
+  namespace: schmaps
+  labels:
+    app.kubernetes.io/name: schmaps
+    app.kubernetes.io/component: web
+spec:
+  # Baseline replicas; the HPA manages this between minReplicas/maxReplicas.
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: schmaps
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: schmaps
+        app.kubernetes.io/component: web
+    spec:
+      imagePullSecrets:
+        - name: harbor-pull-secret
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: schmaps
+      # NOTE: image uses `latest` because the Kaniko build pipeline
+      # (`k8s/build.sh`) re-points the tag on every build. The
+      # service-worker `VERSION` in public/sw.js (and the matching
+      # package.json version) is what surfaces the "Update" dialog to
+      # already-running clients. Bump both together whenever the JS
+      # changes; restart the pods only when the server.js does.
+      containers:
+        - name: schmaps
+          image: harbor.srclos.zone/library/schmaps:v0.2.80
+          # Pinned to the explicit v0.2.80 tag so a future `rollout
+          # restart` reliably pulls the new JS shell. `Always` ensures
+          # pods re-pull even when the tag digest is unchanged.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "3000"
+            - name: NODE_ENV
+              value: production
+            # Routing-consensus witness keys (TomTom, Stadia Maps).
+            # Create the secret once:
+            #   kubectl create secret generic schmaps-routing-keys -n schmaps \
+            #     --from-literal=tomtom-key=YOUR_TOMTOM_KEY \
+            #     --from-literal=stadia-key=YOUR_STADIA_KEY
+            # Absent keys just disable that witness — consensus degrades.
+            - name: TOMTOM_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: schmaps-routing-keys
+                  key: tomtom-key
+                  optional: true
+            - name: STADIA_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: schmaps-routing-keys
+                  key: stadia-key
+                  optional: true
+          # Sized for a lightweight, zero-dependency Node process.
+          # ~50 concurrent users per pod -> 10 pods for the 500-user ceiling.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 4
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 4
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop: ["ALL"]
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault

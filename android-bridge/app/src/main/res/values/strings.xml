@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Schmaps Bridge</string>
+    <string name="start">Start bridge</string>
+    <string name="stop">Stop bridge</string>
+    <string name="stopped">Stopped. Pair your ELM327 in Android Bluetooth settings, then start the bridge.</string>
+    <string name="connecting">Connecting to the adapter…</string>
+    <string name="connected_fmt">Connected to %1$s — feeding schmaps at 127.0.0.1:8080</string>
+    <string name="error_fmt">Error: %1$s</string>
+    <string name="hint">Keep this app running while driving. The schmaps web app picks up the feed automatically — look for the gauge strip above the route panel.</string>
+</resources>

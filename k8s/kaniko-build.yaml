@@ -1,0 +1,81 @@
+# One-shot Kaniko build job for Schmaps.
+#
+# The build context tar is served by a temporary in-cluster HTTP server
+# (see k8s/context-server.yaml, applied by k8s/build.sh). An initContainer
+# here downloads the tar from that Service into a shared emptyDir, then
+# Kaniko builds from it and pushes the image to Harbor.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schmaps-build
+  namespace: schmaps
+  labels:
+    app.kubernetes.io/name: schmaps
+    app.kubernetes.io/component: build
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: schmaps
+        app.kubernetes.io/component: build
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: fetch-context
+          image: busybox:latest
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "Downloading build context from context server..."
+              wget -q -O /workspace/context.tar.gz \
+                http://schmaps-context.schmaps.svc.cluster.local/context.tar.gz
+              cd /workspace
+              tar -xzf context.tar.gz
+              rm context.tar.gz
+              echo "Build context ready:"
+              ls -la /workspace
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      containers:
+        - name: kaniko
+          image: gcr.io/kaniko-project/executor:latest
+          args:
+            - --context=/workspace
+            - --dockerfile=/workspace/Dockerfile
+            - --destination=harbor.srclos.zone/library/schmaps:latest
+            - --destination=harbor.srclos.zone/library/schmaps:v0.2.80
+            - --cache=false
+            - --verbosity=info
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: docker-config
+              mountPath: /kaniko/.docker
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: docker-config
+          secret:
+            secretName: harbor-pull-secret
+            items:
+              - key: .dockerconfigjson
+                path: config.json

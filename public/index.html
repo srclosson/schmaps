@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en-CA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Schmaps — All-Canadian Maps</title>
+  <meta name="description" content="Voice-driven, traffic-aware mapping built on Canadian services.">
+  <!-- Spec §7: theme-color paints the Android status bar and task-switcher
+       card. Android Chrome does NOT honor transparent values (the alpha is
+       silently dropped and a solid color is painted anyway), so we emit
+       two opaque, theme-aware colors via the `media` attribute (Chrome
+       92+). The values match the map canvas letterbox so the bar visually
+       merges with the map. theme.js also rewrites the active <meta>
+       dynamically when the user picks a non-system mode. -->
+  <meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#e2e8f0" media="(prefers-color-scheme: light)">
+  <!-- Fallback for browsers that don't honour `media` — picks the light
+       value, which is also what the inline FOUC script defaults to. -->
+  <meta name="theme-color" content="#e2e8f0">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icon-64.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Schmaps">
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="css/app.css">
+  <!-- Spec §10.3 / §11.2 — inline FOUC-prevention: set the data-theme
+       attribute BEFORE <body> paints so the first frame is themed.
+       Values restricted to light|dark|lighting|system; any other value
+       falls back to `system`. The resolver (in app.js) re-asserts the
+       resolved light/dark value once it can read sensors. -->
+  <script>
+    (function () {
+      try {
+        var raw = localStorage.getItem('schmaps.theme');
+        var mode = (raw === 'light' || raw === 'dark' || raw === 'system' || raw === 'lighting') ? raw : 'system';
+        var resolved;
+        if (mode === 'light' || mode === 'dark') resolved = mode;
+        else {
+          // 'system' and 'lighting' (no sensor on first paint) both
+          // resolve via OS preference on the very first frame.
+          var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          resolved = dark ? 'dark' : 'light';
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.setAttribute('data-theme-mode', mode);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+        document.documentElement.setAttribute('data-theme-mode', 'system');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <div id="map" role="application" aria-label="Map">
+    <!-- Required attribution for OpenStreetMap data + OpenFreeMap tiles
+         (Nominatim/Photon geocoding share the same data). MapLibre's own
+         control is disabled (app.js), so this chip carries the credit. -->
+    <div class="map-attribution">
+      © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>
+    </div>
+  </div>
+
+  <!-- ZONE 1: Top Navigation Search Bar — mic embedded inside the input
+       (Android standard). No floating microphone button. -->
+  <header id="topbar">
+    <form id="search-form" autocomplete="off">
+      <input
+        id="search-input"
+        type="search"
+        inputmode="search"
+        enterkeyhint="go"
+        placeholder="Address, place, or “errands: ikea, burger king…”"
+        aria-label="Destination address or errands">
+      <button id="mic-btn" type="button" aria-label="Speak your destination" title="Speak your destination">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Zm6.5-3.5a6.5 6.5 0 0 1-13 0H4a8 8 0 0 0 7 7.94V22h2v-2.56a8 8 0 0 0 7-7.94h-1.5Z"/>
+        </svg>
+      </button>
+    </form>
+  </header>
+
+  <!-- ZONE 2: Right Hand Rail (Control Dock) — the breadcrumb button sets
+       the rail width; speedometer + speed limit dock beneath it. -->
+  <nav id="right-rail" aria-label="Map controls">
+    <button id="breadcrumb-btn" type="button" aria-label="Quick options" title="Quick options" aria-expanded="false" aria-haspopup="menu">
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <path fill="currentColor" d="M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0-6a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/>
+      </svg>
+    </button>
+    <div id="breadcrumb-menu" role="menu" aria-label="Quick options" hidden>
+      <!-- Spec §10.2 — four theme menu items, stacked above the voice
+           toggle. The active mode is marked with [aria-pressed=true] by
+           renderThemeButtons() and gets a visual highlight via CSS. -->
+      <button id="theme-light" type="button" role="menuitem" data-theme-mode="light" aria-label="Light theme" title="Always light">
+        <span class="theme-icon" aria-hidden="true">☀</span>
+        <span>Light</span>
+      </button>
+      <button id="theme-dark" type="button" role="menuitem" data-theme-mode="dark" aria-label="Dark theme" title="Always dark">
+        <span class="theme-icon" aria-hidden="true">🌙</span>
+        <span>Dark</span>
+      </button>
+      <button id="theme-system" type="button" role="menuitem" data-theme-mode="system" aria-label="Follow system theme" title="Match your phone's light or dark setting">
+        <span class="theme-icon" aria-hidden="true">◐</span>
+        <span>System</span>
+      </button>
+      <button id="theme-lighting" type="button" role="menuitem" data-theme-mode="lighting" aria-label="Follow ambient light" title="Follow your phone's brightness sensor — falls back to system if unavailable">
+        <span class="theme-icon" aria-hidden="true">☀</span>
+        <span>Lighting</span>
+      </button>
+      <button id="voice-toggle" type="button" role="menuitem" aria-label="Mute voice guidance" title="Voice guidance on/off" aria-pressed="false">
+        <svg class="icon-on" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.47 4.47 0 0 0 16.5 12ZM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77Z"/>
+        </svg>
+        <svg class="icon-off" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3Zm13.6 3 2.7-2.7-1.4-1.4-2.7 2.7-2.7-2.7-1.4 1.4 2.7 2.7-2.7 2.7 1.4 1.4 2.7-2.7 2.7 2.7 1.4-1.4-2.7-2.7Z"/>
+        </svg>
+        <span>Voice</span>
+      </button>
+      <button id="install-btn" type="button" role="menuitem" hidden>Install</button>
+    </div>
+    <div id="speed-module" aria-hidden="true">
+      <span class="speed-label">km/h</span>
+      <strong id="current-speed">—</strong>
+    </div>
+    <!-- Spec §10.9 — speed-limit comparator: data-state is "ok" | "warn" | "over" | "idle",
+         derived from current-vs-limit with 2 km/h band padding (hysteresis).
+         See public/js/app.js#speedLimitBand() and #paintSpeedLimitBadge(). -->
+    <div id="speed-limit" aria-hidden="true" aria-live="off" data-state="idle">—</div>
+  </nav>
+
+  <div id="autocomplete" role="listbox" aria-label="Address suggestions" hidden></div>
+
+  <div id="status" role="status" aria-live="polite" hidden></div>
+
+  <!-- ZONE 3: Left Hand Pane — Slot 1 (maneuver dialog) + Slot 2 (contextual
+       recenter, only when auto-follow is paused by a manual pan). Slot 3 (trip
+       summary) is the bottom-docked #route-panel. -->
+  <div id="left-pane">
+    <div id="turn-banner" role="region" aria-label="Next turn" hidden>
+      <span id="turn-icon" class="turn-icon">↑</span>
+      <div class="turn-info">
+        <span id="turn-distance" class="turn-distance">in 750 m</span>
+        <strong id="turn-instruction">Continue straight</strong>
+      </div>
+      <div id="turn-lanes" class="turn-lanes" hidden></div>
+    </div>
+    <button id="back-to-loc" type="button" hidden>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path fill="currentColor" d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3A8.994 8.994 0 0 0 13 3.06V1h-2v2.06A8.994 8.994 0 0 0 3.06 11H1v2h2.06A8.994 8.994 0 0 0 11 20.94V23h2v-2.06A8.994 8.994 0 0 0 20.94 13H23v-2h-2.06z"/>
+      </svg>
+      <span>Recenter</span>
+    </button>
+    <!-- Category browse: shown when the viewport has moved away from the
+         searched area — re-runs the browse around the new view. -->
+    <button id="search-area-btn" type="button" hidden>
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+        <path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14Z"/>
+      </svg>
+      <span>Search this area</span>
+    </button>
+  </div>
+
+  <div id="suggest-bar" role="region" aria-label="Did you mean" hidden>
+    <span class="suggest-label" id="suggest-label">Did you mean…</span>
+    <div id="suggest-chips" class="suggest-chips"></div>
+  </div>
+
+  <div id="update-bar" role="dialog" aria-label="Update available" hidden>
+    <span id="update-text">A new version of Schmaps is ready.</span>
+    <button id="update-btn" type="button">Update</button>
+    <button id="update-dismiss" type="button" aria-label="Not now" title="Not now">✕</button>
+  </div>
+
+  <!-- Live car gauges — appears only while the OBD bridge app is
+       feeding http://127.0.0.1:8080 on this phone. -->
+  <section id="obd-strip" aria-label="Car gauges" hidden>
+    <div class="gauge" id="gauge-rpm">
+      <span class="gauge-label">RPM</span>
+      <strong class="gauge-value">—</strong>
+    </div>
+    <div class="gauge" id="gauge-range">
+      <span class="gauge-label">km to empty</span>
+      <strong class="gauge-value">—</strong>
+    </div>
+    <div class="gauge" id="gauge-oil">
+      <span class="gauge-label">oil km</span>
+      <strong class="gauge-value">—</strong>
+    </div>
+    <div class="gauge" id="gauge-coolant">
+      <span class="gauge-label">coolant</span>
+      <strong class="gauge-value">—</strong>
+    </div>
+    <button id="obd-settings-btn" type="button" aria-label="Car settings" title="Car settings">⚙</button>
+  </section>
+
+  <!-- Car settings for the range + oil gauges. -->
+  <div id="obd-settings" role="dialog" aria-label="Car settings" hidden>
+    <div class="obd-field">
+      <label for="obd-tank">Tank size (L)</label>
+      <input id="obd-tank" type="number" inputmode="decimal" min="1" step="1" placeholder="50">
+    </div>
+    <div class="obd-field">
+      <label for="obd-economy">Economy (L/100 km) — used when the car can't report fuel rate</label>
+      <input id="obd-economy" type="number" inputmode="decimal" min="1" step="0.1" placeholder="9.0">
+    </div>
+    <div class="obd-field">
+      <label for="obd-oil-interval">Oil change interval (km)</label>
+      <input id="obd-oil-interval" type="number" inputmode="numeric" min="500" step="500" placeholder="8000">
+    </div>
+    <div class="obd-field">
+      <label for="obd-odo">Odometer now (km)</label>
+      <input id="obd-odo" type="number" inputmode="numeric" min="0" step="1" placeholder="120000">
+    </div>
+    <div class="obd-field">
+      <label for="obd-oil-start">Odometer at last oil change (km)</label>
+      <input id="obd-oil-start" type="number" inputmode="numeric" min="0" step="1" placeholder="119000">
+    </div>
+    <div class="obd-actions">
+      <button id="obd-save" type="button">Save</button>
+      <button id="obd-close" type="button" aria-label="Close settings" title="Close">✕</button>
+    </div>
+  </div>
+
+  <!-- ZONE 3 / Slot 3: trip summary + route actions, docked bottom-left. -->
+  <section id="route-panel" aria-label="Route summary" hidden>
+    <button id="close-route-btn" type="button" aria-label="End navigation" title="End navigation">✕</button>
+    <div class="route-stats">
+      <div class="stat">
+        <span class="label">Distance</span>
+        <strong id="stat-distance">—</strong>
+      </div>
+      <div class="stat">
+        <span class="label">ETA</span>
+        <strong id="stat-duration">—</strong>
+      </div>
+      <div class="stat">
+        <span class="label">Arrive</span>
+        <strong id="stat-eta">—</strong>
+      </div>
+    </div>
+    <button id="start-route-btn" type="button" class="start-route-btn" aria-label="Start navigation" title="Start navigation along the recommended route">▶ Start navigation</button>
+    <div id="usa-banner" class="usa-banner" hidden>
+      ⚠️ The fastest route crosses into the USA — a Canadian alternative is available.
+    </div>
+    <div id="alt-chips" class="alt-chips" hidden></div>
+    <div id="save-row" class="save-row" hidden>
+      <div class="save-heading">Save this destination</div>
+      <input id="save-name" type="text" placeholder="🏷️ Name — e.g. Grandma’s House" aria-label="Name this place" autocomplete="off">
+      <input id="save-tags" type="text" placeholder="Tags — family, ottawa" aria-label="Tags for this place" autocomplete="off">
+      <button id="save-btn" type="button">Save</button>
+      <button id="save-cancel" type="button" aria-label="Cancel saving this place" title="Cancel">✕</button>
+    </div>
+    <ol id="errands-list" class="errands-list" hidden></ol>
+    <div id="quicker-card" class="quicker-card" hidden>
+      <span id="quicker-text" class="quicker-text"></span>
+      <button id="quicker-accept" type="button">Switch</button>
+      <button id="quicker-dismiss" type="button" aria-label="Dismiss the quicker route" title="Dismiss">✕</button>
+    </div>
+  </section>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <!-- Spec §10.6 — load theme.js before the map is constructed so it
+       can prime MAP.style with the right ?theme= selector and the very
+       first map paint is themed correctly. app.js then calls
+       bindMap(map, addRouteLayers) from inside its map.on('load', ...)
+       so future light↔dark flips re-add the route layers after
+       MapLibre's setStyle() drops them. -->
+  <script type="module" src="js/theme.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

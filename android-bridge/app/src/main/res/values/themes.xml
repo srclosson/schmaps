@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SchmapsBridge" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:statusBarColor">#d52b1e</item>
+        <item name="android:navigationBarColor">#ffffff</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

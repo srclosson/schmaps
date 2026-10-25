@@ -1,0 +1,14 @@
+{
+  "name": "schmaps",
+  "version": "0.2.80",
+  "description": "Schmaps — an all-Canadian, voice-driven, traffic-aware mapping PWA.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "icons": "node scripts/gen-icons.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

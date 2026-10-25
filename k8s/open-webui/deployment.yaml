@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: open-webui
+  labels:
+    app.kubernetes.io/name: open-webui
+    app.kubernetes.io/component: web
+spec:
+  # Single replica: chat history/config live on a RWO volume.
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+    # Recreate: RWO PVC cannot be attached to two pods during a rolling update.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: open-webui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: open-webui
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: open-webui
+          image: ghcr.io/open-webui/open-webui:main
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Point at the ollama service in the ollama namespace.
+            - name: OLLAMA_BASE_URL
+              value: http://ollama.ollama.svc.cluster.local
+            # First registered account becomes admin.
+            - name: WEBUI_AUTH
+              value: "true"
+            - name: ENABLE_OLLAMA_API
+              value: "true"
+            # --- Google OAuth (SSO) ---
+            # Allow account creation via Google sign-in.
+            - name: ENABLE_OAUTH_SIGNUP
+              value: "true"
+            # Restrict sign-in to stackgen.com email addresses.
+            - name: OAUTH_ALLOWED_DOMAINS
+              value: stackgen.com
+            # Merge SSO accounts with existing local accounts by email.
+            - name: OAUTH_MERGE_ACCOUNTS_BY_EMAIL
+              value: "true"
+            # Required for proper logout with Google.
+            - name: OPENID_PROVIDER_URL
+              value: https://accounts.google.com/.well-known/openid-configuration
+            # Google OAuth credentials (from google-oauth-credentials secret).
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: google-oauth-credentials
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: google-oauth-credentials
+                  key: GOOGLE_CLIENT_SECRET
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-webui-data
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

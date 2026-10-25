@@ -1,0 +1,35 @@
+[Unit]
+Description=Cloudflare tunnel to the vLLM endpoint (nginx bearer-auth proxy)
+After=network-online.target nginx.service docker.service
+Wants=network-online.target
+Requires=nginx.service
+
+[Service]
+Type=simple
+# Quick Tunnel: no Cloudflare account or DNS needed. The hostname is random and
+# CHANGES EVERY RESTART - read it with:
+#   journalctl -u cloudflared-vllm -n 20 --no-pager | grep trycloudflare.com
+# For a stable hostname, replace this with a named tunnel (see README notes).
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080
+Restart=always
+RestartSec=10
+# Don't let a crash-loop hammer Cloudflare.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Hardening: this only needs to make outbound HTTPS and read its own config.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
