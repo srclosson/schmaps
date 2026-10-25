@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Loopback HTTP server feeding the PWA — without this the
+         socket bind fails and the bridge looks dead. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Classic Bluetooth SPP socket to the ELM327 adapter. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />

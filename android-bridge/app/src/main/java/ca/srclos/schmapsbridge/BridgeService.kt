@@ -48,7 +48,15 @@ class BridgeService : Service() {
         startInForeground("Connecting…")
         BridgeState.set(BridgeState.State.Connecting)
 
-        http = BridgeHttpServer().also { it.start() }
+        // The HTTP server must not kill the service with an unhandled
+        // exception (e.g. bind failure) — surface it as an Error state
+        // the activity can show, and keep the Bluetooth side alive.
+        try {
+            http = BridgeHttpServer().also { it.start() }
+        } catch (e: Exception) {
+            fail("HTTP server failed: ${e.message}")
+            return START_NOT_STICKY
+        }
 
         worker = Thread { runBridge() }.apply {
             name = "obd-bridge"
