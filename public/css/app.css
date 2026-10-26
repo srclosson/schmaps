@@ -195,6 +195,14 @@ body {
 
 #breadcrumb-menu button:hover { background: var(--nav-surface); }
 
+/* AI understanding toggle — highlighted (aria-pressed) = the LLM
+ * backend is active for query understanding. */
+#ai-toggle[aria-pressed="true"] {
+  background: var(--nav-surface);
+  color: var(--blue, #1976d2);
+}
+#ai-toggle[aria-pressed="true"] .theme-icon { filter: none; }
+
 #voice-toggle .icon-off { display: none; }
 
 #voice-toggle.muted .icon-on { display: none; }

@@ -110,6 +110,7 @@ const els = {
   searchForm: $('search-form'),
   searchInput: $('search-input'),
   micBtn: $('mic-btn'),
+  aiToggle: $('ai-toggle'),
   voiceToggle: $('voice-toggle'),
   installBtn: $('install-btn'),
   breadcrumbBtn: $('breadcrumb-btn'),
@@ -741,11 +742,97 @@ function showSuggestions(query, candidates, { title, spoken } = {}) {
   speak(spoken ?? `I couldn't find ${query}. Did you mean ${candidates[0].name}?`);
 }
 
+/* ---------------- AI understanding (LLM query parsing) ---------------- */
+
+/**
+ * The "AI understanding" toggle — when on, messy queries and voice
+ * transcripts go through the self-hosted LLM (server-side
+ * /api/ai/intent, token never in the browser) before the regex
+ * parsers. Off (default) = the classic keyword parsers. Persisted in
+ * localStorage, same store as the OBD settings.
+ */
+const AI_TOGGLE_KEY = 'schmaps-ai-understanding';
+
+function isAiOn() {
+  try {
+    return localStorage.getItem(AI_TOGGLE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setAi(on) {
+  try {
+    localStorage.setItem(AI_TOGGLE_KEY, on ? '1' : '0');
+  } catch {
+    /* private mode — toggle just won't persist */
+  }
+  refreshAiToggle();
+}
+
+function refreshAiToggle() {
+  const on = isAiOn();
+  els.aiToggle.setAttribute('aria-pressed', String(on));
+  els.aiToggle.title = on
+    ? 'LLM query understanding is ON — messy queries go through the AI backend'
+    : 'Use the LLM to understand messy queries';
+}
+
+els.aiToggle.addEventListener('click', () => {
+  const on = !isAiOn();
+  setAi(on);
+  showStatus(on ? 'AI understanding on.' : 'AI understanding off.');
+});
+refreshAiToggle();
+
+/**
+ * Ask the LLM backend to parse a query. Returns the intent
+ * { mode, stops, timeWindow } or null (off, unreachable, bad JSON —
+ * the caller falls back to the regex parsers). Never throws.
+ */
+async function fetchAiIntent(query) {
+  if (!isAiOn()) return null;
+  try {
+    const res = await fetch('/api/ai/intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const intent = data?.intent;
+    if (intent && typeof intent === 'object') return intent;
+    return null;
+  } catch {
+    return null; // network down / timeout — regex parsers take over
+  }
+}
+
 async function handleDestinationQuery(rawQuery) {
   if (!rawQuery || !rawQuery.trim()) return;
   hideSuggestions();
   hideAutocomplete();
   clearPoiMarkers();
+
+  // AI understanding path — the LLM extracts the intent first. A
+  // multi-stop intent goes straight to errands mode with the LLM's
+  // stop list; a mode pins the activity like the regex verb does.
+  // Any failure (off, unreachable, unparseable) falls through to
+  // the regex parsers below — the app behaves exactly as before.
+  const aiIntent = await fetchAiIntent(rawQuery);
+  if (aiIntent && Array.isArray(aiIntent.stops) && aiIntent.stops.length > 1) {
+    if (aiIntent.mode === 'walking') activity.pin(ACTIVITY.WALKING);
+    else if (aiIntent.mode === 'cycling') activity.pin(ACTIVITY.CYCLING);
+    else if (aiIntent.mode === 'driving') activity.pin(ACTIVITY.DRIVING);
+    else activity.clearPin();
+    state.modeOverride =
+      aiIntent.mode === 'walking' ? 'foot'
+      : aiIntent.mode === 'cycling' ? 'bike'
+      : aiIntent.mode === 'driving' ? 'driving'
+      : null;
+    await handleErrandsQuery(aiIntent.stops.join(', '));
+    return;
+  }
 
   // Explicit travel-mode verb — "walk to X", "bike to the grocery
   // store", "fastest route to X". The verb pins the activity (beats

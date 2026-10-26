@@ -27,6 +27,17 @@ const path = require('path');
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+/* ---------------- AI intent (vLLM) ---------------- */
+
+// The "AI understanding" backend — a self-hosted vLLM (gemma) behind
+// a bearer-token proxy. Token stays server-side, same pattern as the
+// TomTom/Stadia witness keys; absent config just disables the feature
+// and the client falls back to its regex parsers.
+const VLLM_BASE = process.env.VLLM_BASE || 'https://vllm2.srclos.net';
+const VLLM_API_KEY = process.env.VLLM_API_KEY || '';
+const VLLM_MODEL = process.env.VLLM_MODEL || 'local-model';
+const VLLM_TIMEOUT_MS = Number(process.env.VLLM_TIMEOUT_MS) || 8000;
+
 /* ---------------- traffic proxy ---------------- */
 
 const TRAFFIC_UPSTREAM =
@@ -823,6 +834,91 @@ async function handleOsmStyle(req, res) {
 }
 
 /**
+ * POST /api/ai/intent — LLM query understanding for the client's
+ * "AI understanding" mode. Body: { q: "voice transcript or typed query" }.
+ * Response: { intent: { mode, stops, timeWindow } } or { intent: null }.
+ *
+ * The vLLM bearer token lives server-side (VLLM_API_KEY), same pattern
+ * as the TomTom/Stadia witness keys — the browser never sees it. The
+ * model is prompted to reply with strict JSON; anything that fails to
+ * parse comes back as intent:null and the client falls back to its
+ * regex parsers. Never throws, never blocks: a dead endpoint just
+ * looks like "no AI".
+ */
+async function handleAiIntent(req, res) {
+  const body = await readJsonBody(req).catch(() => null);
+  const q = typeof body?.q === 'string' ? body.q.trim().slice(0, 500) : '';
+  if (!q) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'q required' }));
+    return;
+  }
+  if (!VLLM_BASE || !VLLM_API_KEY || !VLLM_MODEL) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ intent: null, reason: 'not-configured' }));
+    return;
+  }
+
+  const system =
+    'You extract navigation intents from voice transcripts. Reply ONLY with JSON, ' +
+    'no markdown, no prose. Schema: {"mode":"driving|walking|cycling|null,' +
+    '"stops":[string],"timeWindow":string|null}. mode is the travel mode if ' +
+    'stated, else null. stops is the ordered list of places to visit (empty ' +
+    'array if none). timeWindow is any time constraint mentioned, else null. ' +
+    'Preserve place names verbatim — do not resolve or rewrite them.';
+
+  let intent = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), VLLM_TIMEOUT_MS);
+    const out = await fetch(`${VLLM_BASE}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${VLLM_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: VLLM_MODEL,
+        temperature: 0,
+        max_tokens: 300,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: q },
+        ],
+      }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
+    if (!out.ok) throw new Error(`vllm http ${out.status}`);
+    const data = await out.json();
+    const text = data?.choices?.[0]?.message?.content ?? '';
+    // Strip a stray markdown fence if the model added one, then parse.
+    const json = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const parsed = JSON.parse(json);
+    if (parsed && typeof parsed === 'object') {
+      const stops = Array.isArray(parsed.stops)
+        ? parsed.stops.filter((s) => typeof s === 'string' && s.trim()).slice(0, 8)
+        : [];
+      const mode =
+        parsed.mode === 'driving' || parsed.mode === 'walking' || parsed.mode === 'cycling'
+          ? parsed.mode
+          : null;
+      intent = {
+        mode,
+        stops,
+        timeWindow: typeof parsed.timeWindow === 'string' ? parsed.timeWindow : null,
+      };
+    }
+  } catch {
+    /* timeout / HTTP error / bad JSON — intent stays null */
+  }
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify({ intent }));
+}
+
+/**
  * POST /api/routing/witness — independent travel-time estimates for the
  * client's ETA consensus. Body: { origin:{lat,lon}, destination:{lat,lon} }.
  * Response: { witnesses: [{source, durationSeconds, distanceMeters} | {source, error}] }.
@@ -970,6 +1066,15 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: String(err.message || err) }));
       }
     }
+    return;
+  }
+
+  if (pathname === '/api/ai/intent') {
+    if (req.method === 'POST') {
+      await handleAiIntent(req, res);
+      return;
+    }
+    res.writeHead(405, { Allow: 'POST' }).end('Method not allowed');
     return;
   }
 
