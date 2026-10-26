@@ -27,6 +27,13 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
         send("ATL0")
         send("ATS0")
         send("ATSP0")
+        // ATSP0 only arms auto-detect — the search itself runs on the
+        // first OBD command and can take several seconds on clones,
+        // far longer than the normal per-command timeout. Probe with
+        // 0100 (supported PIDs — every ECU answers it) and a patient
+        // timeout so the poll loop starts on a settled protocol
+        // instead of aborting the search mid-flight.
+        send("0100", timeoutMs = PROBE_TIMEOUT_MS)
         return true
     }
 
@@ -59,7 +66,7 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
      * Send one command, return its response lines (noise stripped),
      * or null on timeout / adapter trouble.
      */
-    fun send(command: String): List<String>? {
+    fun send(command: String, timeoutMs: Long = TIMEOUT_MS): List<String>? {
         return try {
             // Drain anything the clone is still dribbling out.
             while (input.available() > 0) {
@@ -70,7 +77,7 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
             output.flush()
 
             val lines = mutableListOf<String>()
-            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TIMEOUT_MS)
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
             while (System.nanoTime() < deadline) {
                 val line = readLine(deadline) ?: break // timeout or closed
                 val clean = line.trim()
@@ -94,13 +101,17 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
      */
     fun pid(mode: String, pid: String): ByteArray? {
         val lines = send(mode + pid) ?: return null
+        // The ECU answers with the mode + 0x40 (01 → 41) before the
+        // PID: asking "010C" gets back "410C…". Matching the request
+        // bytes ("010C…") never matches — every PID would read null.
+        // Search anywhere in the line, not just the start — some
+        // clones prefix the CAN frame ID ("7E8410C1AF8").
+        val head = "%02X".format(mode.toInt(16) + 0x40) + pid.uppercase()
         for (line in lines) {
             val hex = line.replace(" ", "")
-            val head = mode + pid
-            if (hex.length >= head.length + 2 &&
-                hex.startsWith(head, ignoreCase = true)
-            ) {
-                val data = hex.substring(head.length)
+            val at = hex.indexOf(head, ignoreCase = true)
+            if (at >= 0 && hex.length >= at + head.length + 2) {
+                val data = hex.substring(at + head.length)
                 // Some clones pad with trailing junk; take pairs only.
                 val bytes = ByteArray(data.length / 2) { i ->
                     ((Character.digit(data[i * 2], 16) shl 4) or
@@ -114,5 +125,8 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
 
     companion object {
         private const val TIMEOUT_MS = 1500L
+
+        /** Protocol auto-detect (ATSP0) can take seconds on clones. */
+        private const val PROBE_TIMEOUT_MS = 10_000L
     }
 }
