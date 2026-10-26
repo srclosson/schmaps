@@ -340,9 +340,12 @@ export async function runErrands(origin, fragments, { onProgress } = {}) {
   }
 
   const plan = await planErrands(origin, resolved);
+  // The rush-hour congestion model is car-only — a foot/bike errands
+  // run keeps incident delays but no congestion factor.
   const { trafficSeconds, congestionFactor, incidents, runs } = await trafficAdjust(
     plan.freeFlowSeconds,
-    plan.geometry
+    plan.geometry,
+    { driving: ROUTER.profile === 'driving' }
   );
 
   // Per-stop arrival estimates. Legs are scaled by the overall factor
@@ -372,6 +375,7 @@ export async function runErrands(origin, fragments, { onProgress } = {}) {
     runs,
     legBoundaries,
     maneuvers: plan.maneuvers,
+    travelMode: ROUTER.profile,
   };
 }
 
@@ -403,7 +407,8 @@ export async function refreshErrands(origin, stops) {
 
   const { trafficSeconds, congestionFactor, incidents, runs } = await trafficAdjust(
     freeFlowSeconds,
-    geometry
+    geometry,
+    { driving: ROUTER.profile === 'driving' }
   );
 
   // Per-stop arrival estimates, legs scaled like runErrands() so the
@@ -432,5 +437,6 @@ export async function refreshErrands(origin, stops) {
     runs,
     legBoundaries,
     maneuvers: extractManeuvers(route.legs),
+    travelMode: ROUTER.profile,
   };
 }

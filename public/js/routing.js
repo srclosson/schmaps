@@ -27,7 +27,7 @@
  * in the chip row.
  */
 
-import { ALT_ROUTES, ROUTING_CONSENSUS } from './config.js';
+import { ALT_ROUTES, ROUTER, ROUTING_CONSENSUS } from './config.js';
 import {
   fetchTrafficEvents,
   eventsAlongRoute,
@@ -196,8 +196,13 @@ function osrmRouteToResult(r) {
  */
 export async function computeRoute(origin, destination) {
   // Witnesses (TomTom, Stadia Maps) are fetched in parallel with OSRM
-  // so the consensus cross-check adds no wait to the route.
-  const witnessesPromise = fetchWitnesses(origin, destination);
+  // so the consensus cross-check adds no wait to the route. Driving
+  // routes only — the witnesses are car engines, and their car times
+  // must never average into a foot/bike ETA.
+  const driving = ROUTER.profile === 'driving';
+  const witnessesPromise = driving
+    ? fetchWitnesses(origin, destination)
+    : Promise.resolve([]);
 
   // OSRM primary + alternatives. Throws "no route" for unreachable
   // pairs — the caller surfaces that to the user; the Canada-via
@@ -220,7 +225,7 @@ export async function computeRoute(origin, destination) {
   const { trafficSeconds, congestionFactor, incidents, runs } = await trafficAdjust(
     freeFlowSeconds,
     geometry,
-    { events }
+    { events, driving }
   );
   const crossesUsa = await crossesUsaBorder(geometry);
 
@@ -237,9 +242,10 @@ export async function computeRoute(origin, destination) {
   const alternatives = [];
   for (const altRaw of osrmResult.alternatives ?? []) {
     const alt = osrmRouteToResult(altRaw);
-    const adj = await trafficAdjust(alt.freeFlowSeconds, alt.geometry, { events });
+    const adj = await trafficAdjust(alt.freeFlowSeconds, alt.geometry, { events, driving });
     alternatives.push({
       ...alt,
+      travelMode: ROUTER.profile,
       trafficSeconds: adj.trafficSeconds,
       eta: new Date(Date.now() + adj.trafficSeconds * 1000),
       congestionFactor: adj.congestionFactor,
@@ -278,6 +284,7 @@ export async function computeRoute(origin, destination) {
     incidents,
     runs,
     crossesUsa,
+    travelMode: ROUTER.profile,
     maneuvers,
     edges: primary.edges ?? null,
     maxSpeedKmh: primary.maxSpeedKmh ?? null,
@@ -296,18 +303,24 @@ export async function computeRoute(origin, destination) {
  * routing and errands mode.
  * @param {number} freeFlowSeconds
  * @param {Array<[number,number]>} geometry [lon,lat] pairs
- * @param {{events?:Array}} [opts] pre-fetched events, shared across routes
+ * @param {{events?:Array, driving?:boolean}} [opts] pre-fetched events,
+ *   shared across routes; driving=false skips the car rush-hour model
  * @returns {Promise<{trafficSeconds:number, congestionFactor:number, incidents:Array, runs:Array}>}
  */
-export async function trafficAdjust(freeFlowSeconds, geometry, { events } = {}) {
+export async function trafficAdjust(freeFlowSeconds, geometry, { events, driving = true } = {}) {
   const midpoint = geometry[Math.floor(geometry.length / 2)];
-  const factor = congestionFactor(midpoint, new Date());
+  // The congestion model is a CAR model — walkers and cyclists don't
+  // slow 45% at 8am. Non-driving routes keep incident delays (a
+  // closed road is closed) but skip the rush-hour factor.
+  const factor = driving ? congestionFactor(midpoint, new Date()) : 1;
 
   const allEvents = events ?? (await fetchTrafficEvents());
   const matched = eventsAlongRoute(geometry, allEvents);
   const incidentSeconds = incidentDelaySeconds(matched);
 
-  const { runs } = segmentCongestion(geometry, matched, new Date(), freeFlowSeconds);
+  const { runs } = segmentCongestion(geometry, matched, new Date(), freeFlowSeconds, {
+    congestion: driving,
+  });
   const segmentSeconds = runs.reduce((sum, r) => sum + r.extraSeconds, 0);
 
   return {
@@ -406,7 +419,10 @@ async function canadaViaRoute(origin, destination, events, primaryDistanceMeters
     if (await crossesUsaBorder(geometry)) return null; // still dips south
 
     const freeFlowSeconds = (head.freeFlowSeconds || 0) + (tail.freeFlowSeconds || 0);
-    const adj = await trafficAdjust(freeFlowSeconds, geometry, { events });
+    const adj = await trafficAdjust(freeFlowSeconds, geometry, {
+      events,
+      driving: ROUTER.profile === 'driving',
+    });
     // Maneuvers: head ends with an "arrive" at via; tail starts with
     // "depart" — strip both so the turn dialog reads as one journey.
     const headManeuvers = (head.maneuvers || []).filter(
@@ -443,6 +459,7 @@ async function canadaViaRoute(origin, destination, events, primaryDistanceMeters
       incidents: adj.incidents,
       runs: adj.runs,
       crossesUsa: false,
+      travelMode: ROUTER.profile,
       maneuvers,
       edges,
       maxSpeedKmh: Math.max(

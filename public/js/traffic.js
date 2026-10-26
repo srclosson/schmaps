@@ -232,6 +232,8 @@ function metroDepth([lon, lat]) {
  * @param {Array} matched incidents already filtered to the corridor
  * @param {Date} when departure time
  * @param {number} freeFlowSeconds OSRM duration, spread across stretches
+ * @param {{congestion?:boolean}} [opts] congestion=false (foot/bike
+ *   routes) keeps incident delays but drops the car rush-hour factor
  * @returns {{segments:Array, runs:Array}} runs are merged same-colour
  *   stretches: {coords, color, extraSeconds, factor, midpoint, lengthKm}
  */
@@ -239,7 +241,8 @@ export function segmentCongestion(
   routeCoords,
   matched = [],
   when = new Date(),
-  freeFlowSeconds = 0
+  freeFlowSeconds = 0,
+  { congestion = true } = {}
 ) {
   if (!Array.isArray(routeCoords) || routeCoords.length < 2) {
     return { segments: [], runs: [] };
@@ -283,9 +286,11 @@ export function segmentCongestion(
   }
 
   // Congestion factor at each stretch midpoint + its free-flow share.
+  // Non-driving modes keep factor 1 — a walker's pace is the same at
+  // car rush hour as at noon; only incidents can slow the stretch.
   for (const seg of segments) {
     seg.midIdx = Math.floor((seg.startIdx + seg.endIdx) / 2);
-    seg.factor = congestionFactor(routeCoords[seg.midIdx], when);
+    seg.factor = congestion ? congestionFactor(routeCoords[seg.midIdx], when) : 1;
     seg.freeFlowSeconds =
       freeFlowSeconds > 0 ? (freeFlowSeconds * seg.lengthKm) / totalKm : 0;
     seg.delaySeconds = 0;

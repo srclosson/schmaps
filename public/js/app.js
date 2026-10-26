@@ -181,7 +181,8 @@ const state = {
   lastFix: null, // latest GPS fix {lat, lon, at} — reroute + ETA origin
   refreshTimer: null, // slow 511-events refresh interval (no periodic re-route)
   kmProfile: null, // per-km ETA buckets for the active route (js/eta.js)
-  speedRatio: 1, // personal speed factor vs the router's assumption (EMA, clamped)
+  speedRatio: 1, // personal speed factor vs the router's assumption (EMA, clamped) — DRIVING routes only
+  lastTravelMode: null, // travelMode of the last route — mode switches reset the ratio
   lastProgressM: 0, // metres covered along the route — monotonic ETA anchor
   progressVertex: 0, // geometry vertex at the progress anchor — greys the driven line
   offRouteStreak: 0, // consecutive fixes > REROUTE_OFF_METERS from the line
@@ -1600,6 +1601,14 @@ function setHud(route) {
     state.lastProgressM = 0;
     state.progressVertex = 0;
     state.limitsFetchedUpTo = -1;
+    // A new travel mode invalidates the calibration: a car-tuned
+    // ratio must never re-time a walk, and a walk teaches nothing
+    // about the car. The ratio restarts at 1 for the new mode.
+    const mode = route.travelMode ?? 'driving';
+    if (mode !== state.lastTravelMode) {
+      state.lastTravelMode = mode;
+      state.speedRatio = 1;
+    }
   }
 }
 
@@ -2351,6 +2360,7 @@ function clearRoute() {
   state.routePreference = null;
   state.kmProfile = null;
   state.speedRatio = 1;
+  state.lastTravelMode = null;
   state.lastProgressM = 0;
   state.progressVertex = 0;
   resetRouteOffers();
@@ -2751,13 +2761,19 @@ function tickNavigationEta() {
 
   const speedKmh = state.currentSpeedKmh;
   const { index: bucketIdx, bucket } = bucketAt(profile, state.lastProgressM);
+  // Car habits apply to car routes only. A foot/bike route is timed
+  // at the router's own pace — the driving-learned profile and the
+  // car-calibrated session ratio must never re-time a walk.
+  const routeIsDriving = (route.travelMode ?? 'driving') === 'driving';
   // Reference speed for the ratio: the posted limit when known, the
   // router's implied speed otherwise — and off-car (foot/bike routes
   // carry no posted limits), the classifier's per-mode reference so
   // the personal ratio still calibrates against something sane.
   const refKmh =
     bucket?.limitKmh ?? bucket?.impliedKmh ?? activity.referenceKmh() ?? null;
-  state.speedRatio = updateSpeedRatio(state.speedRatio, { speedKmh, refKmh });
+  if (routeIsDriving) {
+    state.speedRatio = updateSpeedRatio(state.speedRatio, { speedKmh, refKmh });
+  }
   // Learn into the persistent profile — real DRIVING speeds only
   // (never walking, running or cycling: those aren't speed-limit
   // habits), and never on a stretch flagged with a live incident:
@@ -2767,7 +2783,11 @@ function tickNavigationEta() {
   // multiplier) and, only for persistently deviant heavily-traveled
   // roads, a segment override (OSM node pair).
   const incidentFlag = (bucket?.incidentS ?? 0) > 0;
+  // The route-mode check double-gates the classifier: a pinned
+  // "walk to X" can't store car habits even if the GPS signature
+  // hiccups into DRIVING for a window.
   if (
+    routeIsDriving &&
     activity.getActivity() === ACTIVITY.DRIVING &&
     refKmh !== null &&
     Number.isFinite(speedKmh) &&
@@ -2782,7 +2802,13 @@ function tickNavigationEta() {
     progressM: state.lastProgressM,
     speedKmh,
     ratio: state.speedRatio,
-    predict: (ref, segKey) => driverProfile.predictSpeed(ref, segKey),
+    // Driving-learned speeds re-time driving routes only — segment
+    // overrides are keyed by OSM node pairs, the same physical
+    // streets a foot route travels, so an ungated consult would
+    // impose car speeds on a walk.
+    predict: routeIsDriving
+      ? (ref, segKey) => driverProfile.predictSpeed(ref, segKey)
+      : null,
   });
   route.trafficSeconds = Math.max(30, Math.round(remain));
   route.eta = new Date(Date.now() + route.trafficSeconds * 1000);
@@ -2837,6 +2863,11 @@ const LIMITS_LOOKAHEAD_BUCKETS = 5; // fetch limits for the next ~5 km
 async function ensurePostedLimits(currentBucket) {
   const profile = state.kmProfile;
   if (!profile) return;
+  // Posted limits are CAR limits — they feed the speed-limit badge and
+  // the driving ratio's reference speed. Foot/bike routes never fetch
+  // them: a 60 km/h car limit stamped onto a bike bucket would corrupt
+  // the ratio's reference and the badge alike.
+  if (((state.errands ?? state.route)?.travelMode ?? 'driving') !== 'driving') return;
   const endBucket = Math.min(profile.buckets.length - 1, currentBucket + LIMITS_LOOKAHEAD_BUCKETS);
   if (endBucket <= state.limitsFetchedUpTo) return; // window already known
   const from = state.limitsFetchedUpTo + 1;

@@ -56,6 +56,11 @@
  * null and the ETA falls down that hierarchy. Scalars are clamped to a
  * sane band: never below 60% of the limit (traffic exists) nor above
  * 130% (physics and police exist).
+ *
+ * Mode fence: this profile is CAR-ONLY. Samples are recorded only
+ * while the activity classifier says DRIVING (js/app.js), and
+ * predictSpeed() is consulted only for driving routes — walking and
+ * cycling times are never stored here, and never shaped by it.
  */
 
 const STORAGE_KEY = 'schmaps-driver-speeds';
