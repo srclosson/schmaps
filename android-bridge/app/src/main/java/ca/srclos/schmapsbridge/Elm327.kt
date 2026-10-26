@@ -1,9 +1,7 @@
 package ca.srclos.schmapsbridge
 
-import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.io.OutputStream
 import java.util.concurrent.TimeUnit
 
@@ -14,8 +12,6 @@ import java.util.concurrent.TimeUnit
  * prompt, and strips the usual clone noise (NO DATA, SEARCHING…).
  */
 class Elm327(private val input: InputStream, private val output: OutputStream) {
-
-    private val reader = BufferedReader(InputStreamReader(input, Charsets.US_ASCII))
 
     /** Wake the adapter and put it in a known state. */
     fun initialize(): Boolean {
@@ -35,13 +31,40 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
     }
 
     /**
+     * Read one line with a hard deadline. BluetoothSocket streams
+     * ignore SO_TIMEOUT, so a blocking readLine() would hang forever
+     * on a silent adapter — the classic "stuck at Connecting…" bug.
+     * Byte-wise read with available() polling enforces the deadline
+     * ourselves; returns null on timeout or stream close.
+     */
+    private fun readLine(deadlineNanos: Long): String? {
+        val sb = StringBuilder()
+        while (System.nanoTime() < deadlineNanos) {
+            if (input.available() > 0) {
+                val b = input.read()
+                if (b < 0) return null // stream closed
+                if (b == '\n'.code || b == '\r'.code) {
+                    if (sb.isNotEmpty()) return sb.toString()
+                    continue // skip empty lines / CRLF halves
+                }
+                sb.append(b.toChar())
+            } else {
+                Thread.sleep(10) // nothing yet — poll again
+            }
+        }
+        return if (sb.isNotEmpty()) sb.toString() else null
+    }
+
+    /**
      * Send one command, return its response lines (noise stripped),
      * or null on timeout / adapter trouble.
      */
     fun send(command: String): List<String>? {
         return try {
             // Drain anything the clone is still dribbling out.
-            while (reader.ready()) reader.readLine()
+            while (input.available() > 0) {
+                if (input.read() < 0) return null
+            }
 
             output.write((command + "\r").toByteArray(Charsets.US_ASCII))
             output.flush()
@@ -49,7 +72,7 @@ class Elm327(private val input: InputStream, private val output: OutputStream) {
             val lines = mutableListOf<String>()
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(TIMEOUT_MS)
             while (System.nanoTime() < deadline) {
-                val line = reader.readLine() ?: return null // stream closed
+                val line = readLine(deadline) ?: break // timeout or closed
                 val clean = line.trim()
                 if (clean.isEmpty()) continue
                 if (clean == ">") break // prompt — response complete
