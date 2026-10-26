@@ -4,7 +4,7 @@
  * Nominatim → Photon) → route (OSRM) → traffic-adjusted ETA.
  */
 
-import { MAP, TRAFFIC, ALT_ROUTES, GPS, OBD } from './config.js';
+import { MAP, TRAFFIC, ALT_ROUTES, GPS, OBD, ROUTER } from './config.js';
 import { geocodeAddress } from './geocode.js';
 import { geocodeChain, geocodePhoton, isAddressQuery, reverseGeocode } from './geocoders.js';
 import { searchPOI, searchCategoryPOI, fetchPostedLimits } from './poi.js';
