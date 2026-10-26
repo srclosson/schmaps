@@ -1,4 +1,4 @@
-npm install -g @openhands/agent-canvasimport java.util.Properties
+oimport java.util.Properties
 import java.util.Base64
 import java.security.KeyStore
 
