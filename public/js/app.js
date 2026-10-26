@@ -4,7 +4,7 @@
  * Nominatim → Photon) → route (OSRM) → traffic-adjusted ETA.
  */
 
-import { MAP, TRAFFIC, ALT_ROUTES, GPS, OBD, ROUTER } from './config.js';
+import { MAP, TRAFFIC, ALT_ROUTES, GPS, OBD, ROUTER, START_TIMEOUT } from './config.js';
 import { geocodeAddress } from './geocode.js';
 import { geocodeChain, geocodePhoton, isAddressQuery, reverseGeocode } from './geocoders.js';
 import { searchPOI, searchCategoryPOI, fetchPostedLimits } from './poi.js';
@@ -1566,6 +1566,56 @@ function renderRoute() {
   // (silence deviation, refresh re-preference) doesn't yank the Start
   // CTA back onto the screen once we're already moving.
   els.startRouteBtn.hidden = state.navigating;
+  if (!state.navigating) startCountdown();
+}
+
+/* ---------------- selection-mode auto-start countdown ---------------- */
+
+/**
+ * The Start CTA's auto-start countdown. When the button appears in
+ * selection mode, it starts as a light blue wash and fills left→right
+ * with the solid blue over START_TIMEOUT.ms — the fill IS the visible
+ * countdown. If it completes, navigation begins on the current
+ * primary (the suggested route). Any explicit gesture — tapping
+ * Start, choosing a route chip/badge, starting elsewhere — cancels it.
+ *
+ * The fill width is driven by a CSS custom property (--fill) updated
+ * on a 100 ms interval; the CSS transition smooths it, so the sweep
+ * reads as continuous even though the timer ticks coarsely. A
+ * wall-clock deadline (not tick count) keeps the timeout honest even
+ * if the tab is throttled in the background.
+ */
+const countdown = {
+  timer: null, // setInterval id — drives the fill
+  deadline: 0, // ms epoch when the countdown fires
+};
+
+function startCountdown() {
+  stopCountdown();
+  countdown.deadline = Date.now() + START_TIMEOUT.ms;
+  els.startRouteBtn.style.setProperty('--fill', '0%');
+  countdown.timer = setInterval(() => {
+    const left = countdown.deadline - Date.now();
+    if (left <= 0) {
+      stopCountdown();
+      // Timeout: the user didn't choose — the suggested route wins.
+      if (state.route && !state.navigating) {
+        speak('Starting navigation on the suggested route.');
+        startNavigating();
+      }
+      return;
+    }
+    const pct = ((START_TIMEOUT.ms - left) / START_TIMEOUT.ms) * 100;
+    els.startRouteBtn.style.setProperty('--fill', `${pct.toFixed(1)}%`);
+  }, 100);
+}
+
+function stopCountdown() {
+  if (countdown.timer !== null) {
+    clearInterval(countdown.timer);
+    countdown.timer = null;
+  }
+  els.startRouteBtn.style.removeProperty('--fill');
 }
 
 /* ---------------- shared render helpers ---------------- */
@@ -2381,6 +2431,7 @@ function clearRoute() {
   els.altChips.hidden = true;
   els.usaBanner.hidden = true;
   if (els.startRouteBtn) els.startRouteBtn.hidden = true;
+  stopCountdown();
   if (state.destMarker) {
     state.destMarker.remove();
     state.destMarker = null;
@@ -2461,6 +2512,7 @@ function startNavigating() {
   els.backToLoc.hidden = true;
   // The Start CTA has done its job — collapse it now that we're moving.
   if (els.startRouteBtn) els.startRouteBtn.hidden = true;
+  stopCountdown();
   // Mode flipped from selection → navigation. The primary's badge must
   // collapse so it doesn't compete with itself on the map; alternatives
   // remain shown so the driver can still switch while driving.
@@ -3168,6 +3220,7 @@ els.closeBtn.addEventListener('click', () => {
  * the current primary route; navigation begins and the button collapses. */
 els.startRouteBtn.addEventListener('click', () => {
   if (!state.route) return;
+  stopCountdown(); // explicit tap — the user chose
   startNavigating();
 });
 

@@ -46,6 +46,17 @@ export const OBD = {
   defaultOilIntervalKm: 8000,
 };
 
+/**
+ * Selection-mode auto-start. When a route is computed and the Start
+ * CTA appears, a countdown runs this long; if the user hasn't tapped
+ * Start (or chosen a route) by the end, navigation begins on the
+ * current primary — the suggested route. The button fills left→right
+ * with the solid blue over the countdown so the deadline is visible.
+ */
+export const START_TIMEOUT = {
+  ms: 10_000,
+};
+
 export const GPS = {
   // Route planning waits for a fix at least this accurate (metres) —
   // a coarse cell-tower fix can be off by a kilometre, which plans

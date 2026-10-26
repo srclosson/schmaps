@@ -584,8 +584,15 @@ body {
 /* Spec §3.1 — Selection mode: a clear "Start" CTA sits below the
  * route stats so the user has a one-tap path to commit to the current
  * primary. Becomes the same navigation gesture as tapping the primary
- * badge on the map. Hidden once navigation begins. */
+ * badge on the map. Hidden once navigation begins.
+ *
+ * Auto-start countdown: the button starts as a LIGHT blue wash and
+ * fills left→right with the solid blue over START_TIMEOUT.ms — the
+ * fill IS the countdown. When it completes, navigation auto-starts on
+ * the current primary (the suggested route). The fill is a ::before
+ * overlay so the label stays crisp above it. */
 .start-route-btn {
+  position: relative;
   display: block;
   width: 100%;
   margin: 12px 0 4px;
@@ -594,12 +601,30 @@ body {
   font-weight: 600;
   letter-spacing: 0.02em;
   color: #fff;
-  background: var(--blue, #1976d2);
+  background: rgba(25, 118, 210, 0.28); /* light blue — the unfilled state */
   border: none;
   border-radius: 10px;
   box-shadow: 0 2px 6px rgba(25, 118, 210, 0.35);
   cursor: pointer;
   transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  overflow: hidden; /* clip the fill to the button's rounded box */
+  isolation: isolate; /* stacking context: the fill paints above the
+                         background but below the label text */
+}
+/* The countdown fill — solid blue sweeping left→right. Width is
+ * driven by JS (a CSS custom property) so the timer can be cancelled
+ * or restarted without animation juggling; linear so it matches the
+ * wall-clock timeout exactly. */
+.start-route-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: var(--fill, 0%);
+  background: var(--blue, #1976d2);
+  border-radius: inherit;
+  transition: width 0.15s linear;
+  pointer-events: none;
+  z-index: -1; /* above the light-blue background, below the label */
 }
 .start-route-btn:hover,
 .start-route-btn:focus-visible {
@@ -609,6 +634,11 @@ body {
 }
 .start-route-btn:active { transform: translateY(0); }
 .start-route-btn[hidden] { display: none; }
+/* Reduced motion: the fill still tracks the timeout (it's information,
+ * not decoration) but stops animating between ticks. */
+@media (prefers-reduced-motion: reduce) {
+  .start-route-btn::before { transition: none; }
+}
 
 .label {
   display: block;
