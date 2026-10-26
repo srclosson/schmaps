@@ -41,8 +41,8 @@ spec:
       # changes; restart the pods only when the server.js does.
       containers:
         - name: schmaps
-          image: harbor.srclos.zone/library/schmaps:v0.2.84
-          # Pinned to the explicit v0.2.84 tag so a future `rollout
+          image: harbor.srclos.zone/library/schmaps:v0.2.85
+          # Pinned to the explicit v0.2.85 tag so a future `rollout
           # restart` reliably pulls the new JS shell. `Always` ensures
           # pods re-pull even when the tag digest is unchanged.
           imagePullPolicy: Always

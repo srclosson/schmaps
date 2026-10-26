@@ -1,6 +1,6 @@
 {
   "name": "schmaps",
-  "version": "0.2.84",
+  "version": "0.2.85",
   "description": "Schmaps — an all-Canadian, voice-driven, traffic-aware mapping PWA.",
   "private": true,
   "license": "MIT",

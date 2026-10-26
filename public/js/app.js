@@ -360,6 +360,20 @@ function startStandbyWatch() {
         // current location cursor, zero-touch.
         map.flyTo({ center: [lon, lat], zoom: 17, essential: true });
       }
+      // Moving mode (free-roam follow): once you're genuinely moving —
+      // walking, cycling, driving without a route — keep the map
+      // centered on you, same as navigation. A user gesture (drag/
+      // zoom/rotate) pauses it via pauseFollow() and surfaces the
+      // "Back to location" pill; resumeFollow() re-centers and
+      // re-enables. Stationary fixes don't fight the user for the
+      // camera — only movement does.
+      else if (
+        state.following &&
+        Number.isFinite(speed) &&
+        speed * 3.6 >= 2 // ≥ ~2 km/h — genuinely moving, not GPS jitter
+      ) {
+        map.easeTo({ center: [lon, lat], duration: 900, essential: true });
+      }
     },
     () => {},
     { enableHighAccuracy: true, maximumAge: 2000 }
